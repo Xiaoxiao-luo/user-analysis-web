@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <title>数据分析器（二期）</title>
+  <style>
+    body { font-family: Arial, sans-serif; background:#f5f6f8; margin:0; }
+    .container { display:flex; gap:20px; padding:20px; }
+    .card { background:#fff; border-radius:10px; padding:16px; width:33%;
+            box-shadow:0 2px 8px rgba(0,0,0,0.10); }
+    .card h2 { margin:0 0 10px; font-size:18px; }
+    .row { margin:10px 0; }
+    button { padding:8px 12px; cursor:pointer; }
+    input[type="file"] { width:100%; }
+    .msg { font-size:13px; color:#333; white-space:pre-wrap; }
+    .err { color:#c0392b; }
+    .warn { color:#8e6e00; }
+    img { max-width:100%; border:1px solid #eee; border-radius:8px; margin-top:10px; }
+    .kv { font-size:13px; background:#fafafa; border:1px solid #eee; padding:10px; border-radius:8px; }
+    .kv div { margin:4px 0; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+
+  <div class="card" id="card1">
+    <h2>模块一：体验金 → 首充</h2>
+    <div class="row">
+      <label><input type="radio" name="module" value="1"> 选择模块一</label>
+    </div>
+    <div class="row">
+      <input type="file" id="file1" accept=".xlsx,.xls" disabled />
+    </div>
+    <div class="row">
+      <button id="run1" disabled>开始分析</button>
+    </div>
+    <div class="msg" id="msg1"></div>
+    <div class="kv" id="res1"></div>
+    <img id="pie1" />
+    <img id="bar1" />
+  </div>
+
+  <div class="card" id="card2">
+    <h2>模块二：首充 → 二充</h2>
+    <div class="row">
+      <label><input type="radio" name="module" value="2"> 选择模块二</label>
+    </div>
+    <div class="row">
+      <input type="file" id="file2" accept=".xlsx,.xls" disabled />
+    </div>
+    <div class="row">
+      <button id="run2" disabled>开始分析</button>
+    </div>
+    <div class="msg" id="msg2"></div>
+    <div class="kv" id="res2"></div>
+    <img id="pie2" />
+    <img id="bar2" />
+  </div>
+
+  <div class="card" id="card3">
+    <h2>模块三：二充 → PLUS</h2>
+    <div class="row">
+      <label><input type="radio" name="module" value="3"> 选择模块三</label>
+    </div>
+    <div class="row">
+      <input type="file" id="file3" accept=".xlsx,.xls" disabled />
+    </div>
+    <div class="row">
+      <button id="run3" disabled>开始分析</button>
+    </div>
+    <div class="msg" id="msg3"></div>
+    <div class="kv" id="res3"></div>
+    <img id="pie3" />
+    <img id="bar3" />
+  </div>
+
+</div>
+
+<script>
+  const radios = document.querySelectorAll('input[name="module"]');
+
+  function resetAllUI() {
+    for (let i=1; i<=3; i++) {
+      document.getElementById(`file${i}`).disabled = true;
+      document.getElementById(`run${i}`).disabled = true;
+      document.getElementById(`msg${i}`).textContent = "";
+      document.getElementById(`res${i}`).innerHTML = "";
+      document.getElementById(`pie${i}`).src = "";
+      document.getElementById(`bar${i}`).src = "";
+      document.getElementById(`file${i}`).value = "";
+    }
+  }
+
+  function enableModule(m) {
+    resetAllUI();
+    document.getElementById(`file${m}`).disabled = false;
+    document.getElementById(`run${m}`).disabled = false;
+  }
+
+  radios.forEach(r => r.addEventListener('change', () => enableModule(r.value)));
+
+  async function runModule(m) {
+    const fileInput = document.getElementById(`file${m}`);
+    const msg = document.getElementById(`msg${m}`);
+    const res = document.getElementById(`res${m}`);
+    const pie = document.getElementById(`pie${m}`);
+    const bar = document.getElementById(`bar${m}`);
+
+    msg.textContent = "";
+    res.innerHTML = "";
+    pie.src = "";
+    bar.src = "";
+
+    if (!fileInput.files || fileInput.files.length === 0) {
+      msg.innerHTML = `<span class="err">请先上传Excel文件</span>`;
+      return;
+    }
+
+    const fd = new FormData();
+    fd.append("module", String(m));
+    fd.append("file", fileInput.files[0]);
+
+    msg.textContent = "分析中...";
+
+    const resp = await fetch("/run", { method: "POST", body: fd });
+    const data = await resp.json();
+
+    if (!data.ok) {
+      msg.innerHTML =
+        `<div class="err">错误：\n- ${(data.errors||[]).join("\n- ")}</div>` +
+        ((data.warnings && data.warnings.length) ? `<div class="warn">\n警告：\n- ${data.warnings.join("\n- ")}</div>` : "");
+      return;
+    }
+
+    msg.innerHTML =
+      ((data.warnings && data.warnings.length) ? `<div class="warn">提示：\n- ${data.warnings.join("\n- ")}</div>` : "");
+
+    const r = data.result || {};
+    const lines = [];
+    for (const k of Object.keys(r)) {
+      if (typeof r[k] === "object" && r[k] !== null) continue;
+      lines.push(`<div><b>${k}</b>：${r[k]}</div>`);
+    }
+
+    if (r["分布(人数)"]) {
+      lines.push(`<div style="margin-top:8px;"><b>分布(人数)</b>：</div>`);
+      for (const kk of Object.keys(r["分布(人数)"])) {
+        lines.push(`<div>${kk}：${r["分布(人数)"][kk]}</div>`);
+      }
+    }
+
+    res.innerHTML = lines.join("");
+
+    if (data.pie_png_base64) pie.src = "data:image/png;base64," + data.pie_png_base64;
+    if (data.bar_png_base64) bar.src = "data:image/png;base64," + data.bar_png_base64;
+
+    msg.textContent = "";
+  }
+
+  document.getElementById("run1").addEventListener("click", () => runModule(1));
+  document.getElementById("run2").addEventListener("click", () => runModule(2));
+  document.getElementById("run3").addEventListener("click", () => runModule(3));
+
+  resetAllUI();
+</script>
+
+</body>
+</html>
+
