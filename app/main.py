@@ -20,20 +20,27 @@ COL_SECOND = "二充时间"
 COL_PLUS = "升级PLUS时间"
 
 def _set_cn_font():
-    # 让 Render/Linux 也能显示中文：使用项目自带字体文件
+    """
+    强制 matplotlib 在 Render / Linux 环境下
+    使用项目内置的中文字体（Noto Sans CJK）
+    """
     font_path = os.path.join(
         os.path.dirname(__file__),
         "..",
         "fonts",
         "NotoSansCJK-Regular.ttc"
     )
+
     try:
         font_manager.fontManager.addfont(font_path)
+
+        # 🔥 关键三行（缺一不可）
+        mpl.rcParams["font.family"] = "sans-serif"
         mpl.rcParams["font.sans-serif"] = ["Noto Sans CJK SC"]
-    except Exception:
-        # 即使字体加载失败，也不要让程序崩
-        pass
-    mpl.rcParams["axes.unicode_minus"] = False
+        mpl.rcParams["axes.unicode_minus"] = False
+
+    except Exception as e:
+        print("Font load failed:", e)
 
 def _annotate_bars(values):
     for i, v in enumerate(values):
