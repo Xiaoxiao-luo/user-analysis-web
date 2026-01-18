@@ -21,12 +21,17 @@ COL_PLUS = "升级PLUS时间"
 
 def _set_cn_font():
     # 让 Render/Linux 也能显示中文：使用项目自带字体文件
-    font_path = os.path.join(os.path.dirname(__file__), "..", "fonts", "NotoSansCJK-Regular.ttc")
+    font_path = os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "fonts",
+        "NotoSansCJK-Regular.ttc"
+    )
     try:
         font_manager.fontManager.addfont(font_path)
         mpl.rcParams["font.sans-serif"] = ["Noto Sans CJK SC"]
     except Exception:
-        # 字体加载失败也不让程序崩
+        # 即使字体加载失败，也不要让程序崩
         pass
     mpl.rcParams["axes.unicode_minus"] = False
 
