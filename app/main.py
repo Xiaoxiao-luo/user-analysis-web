@@ -1,6 +1,9 @@
 import base64
 import io
 from typing import Dict, List, Tuple
+import os
+from matplotlib import font_manager
+
 
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -17,7 +20,14 @@ COL_SECOND = "二充时间"
 COL_PLUS = "升级PLUS时间"
 
 def _set_cn_font():
-    mpl.rcParams["font.sans-serif"] = ["Arial Unicode MS", "PingFang SC", "Heiti SC"]
+    # 让 Render/Linux 也能显示中文：使用项目自带字体文件
+    font_path = os.path.join(os.path.dirname(__file__), "..", "fonts", "NotoSansCJK-Regular.ttc")
+    try:
+        font_manager.fontManager.addfont(font_path)
+        mpl.rcParams["font.sans-serif"] = ["Noto Sans CJK SC"]
+    except Exception:
+        # 字体加载失败也不让程序崩
+        pass
     mpl.rcParams["axes.unicode_minus"] = False
 
 def _annotate_bars(values):
