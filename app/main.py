@@ -1,50 +1,48 @@
 import base64
 import io
-from typing import Dict, List, Tuple
 import os
-from matplotlib import font_manager
-
+from typing import Dict, List, Tuple
 
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib as mpl
+from matplotlib import font_manager
+from matplotlib.font_manager import FontProperties
+
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
+# ========= 列名（与你Excel一致） =========
 COL_REG = "注册时间"
 COL_EXP = "体验金领取时间"
 COL_FIRST = "首充时间"
 COL_SECOND = "二充时间"
 COL_PLUS = "升级PLUS时间"
 
+# ========= 字体：解决 Render/Linux 中文方块 =========
+FONT_PATH = os.path.join(os.path.dirname(__file__), "..", "fonts", "NotoSansCJK-Regular.ttc")
+CN_FONT = FontProperties(fname=FONT_PATH)
+
 def _set_cn_font():
     """
-    强制 matplotlib 在 Render / Linux 环境下
-    使用项目内置的中文字体（Noto Sans CJK）
+    注册并设置全局默认字体（尽量让坐标轴/刻度等自动走中文字体）
+    标题/饼图标签仍会显式用 CN_FONT（更稳）
     """
-    font_path = os.path.join(
-        os.path.dirname(__file__),
-        "..",
-        "fonts",
-        "NotoSansCJK-Regular.ttc"
-    )
-
     try:
-        font_manager.fontManager.addfont(font_path)
-
-        # 🔥 关键三行（缺一不可）
+        font_manager.fontManager.addfont(FONT_PATH)
         mpl.rcParams["font.family"] = "sans-serif"
         mpl.rcParams["font.sans-serif"] = ["Noto Sans CJK SC"]
-        mpl.rcParams["axes.unicode_minus"] = False
+    except Exception:
+        pass
+    mpl.rcParams["axes.unicode_minus"] = False
 
-    except Exception as e:
-        print("Font load failed:", e)
-
+# ========= 图形通用 =========
 def _annotate_bars(values):
+    # values: list/ndarray
     for i, v in enumerate(values):
-        plt.text(i, v, str(int(v)), ha="center", va="bottom")
+        plt.text(i, v, str(int(v)), ha="center", va="bottom", fontproperties=CN_FONT)
 
 def _fig_to_base64_png() -> str:
     buf = io.BytesIO()
@@ -61,8 +59,10 @@ def _safe_to_datetime(df: pd.DataFrame, cols: List[str]) -> None:
 def _missing_cols(df: pd.DataFrame, cols: List[str]) -> List[str]:
     return [c for c in cols if c not in df.columns]
 
+# ========= 模块1：首充（全表首充非空为母体） =========
 def analyze_module1(df: pd.DataFrame) -> Tuple[Dict, str, str, List[str], List[str]]:
     warnings, errors = [], []
+
     need = [COL_FIRST, COL_EXP]
     miss = _missing_cols(df, need)
     if miss:
@@ -72,6 +72,7 @@ def analyze_module1(df: pd.DataFrame) -> Tuple[Dict, str, str, List[str], List[s
 
     base = df[df[COL_FIRST].notna()].copy()
     n_first = len(base)
+
     if n_first == 0:
         return {"完成首充用户数": 0}, "", "", [], ["首充时间全为空，无法生成分布图。"]
 
@@ -97,22 +98,34 @@ def analyze_module1(df: pd.DataFrame) -> Tuple[Dict, str, str, List[str], List[s
 
     dist = base["bucket"].value_counts().reindex(order, fill_value=0)
     ratio = (dist / n_first).fillna(0)
-    avg_days = base.loc[base["delta_days"].notna() & (base["delta_days"] >= 0), "delta_days"].mean()
 
+    avg_days = base.loc[
+        base["delta_days"].notna() & (base["delta_days"] >= 0),
+        "delta_days"
+    ].mean()
+
+    # --- 柱状图（带柱顶数字） ---
     _set_cn_font()
     plt.figure()
     plt.bar(dist.index, dist.values)
     _annotate_bars(dist.values)
-    plt.title("模块1：首充时间分布")
-    plt.xlabel("时间区间")
-    plt.ylabel("用户数")
-    plt.xticks(rotation=15)
+    plt.title("模块1：首充时间分布", fontproperties=CN_FONT)
+    plt.xlabel("时间区间", fontproperties=CN_FONT)
+    plt.ylabel("用户数", fontproperties=CN_FONT)
+    plt.xticks(rotation=15, fontproperties=CN_FONT)
+    plt.yticks(fontproperties=CN_FONT)
     bar_b64 = _fig_to_base64_png()
 
+    # --- 饼图（关键：textprops 强制字体） ---
     _set_cn_font()
     plt.figure()
-    plt.pie(dist.values, labels=dist.index, autopct=None)
-    plt.title("模块1：首充分布（占比结构）")
+    plt.pie(
+        dist.values,
+        labels=dist.index,
+        autopct=None,
+        textprops={"fontproperties": CN_FONT}
+    )
+    plt.title("模块1：首充分布（占比结构）", fontproperties=CN_FONT)
     pie_b64 = _fig_to_base64_png()
 
     result = {
@@ -124,8 +137,10 @@ def analyze_module1(df: pd.DataFrame) -> Tuple[Dict, str, str, List[str], List[s
     }
     return result, pie_b64, bar_b64, errors, warnings
 
+# ========= 模块2：二充（母体=首充非空） =========
 def analyze_module2(df: pd.DataFrame) -> Tuple[Dict, str, str, List[str], List[str]]:
     warnings, errors = [], []
+
     need = [COL_FIRST, COL_SECOND]
     miss = _missing_cols(df, need)
     if miss:
@@ -161,20 +176,28 @@ def analyze_module2(df: pd.DataFrame) -> Tuple[Dict, str, str, List[str], List[s
     dist = pd.Series(dist_dict).reindex(order, fill_value=0)
     ratio = (dist / base_n).fillna(0)
 
+    # --- 柱状图 ---
     _set_cn_font()
     plt.figure()
     plt.bar(dist.index, dist.values)
     _annotate_bars(dist.values)
-    plt.title("模块2：二充时间分布")
-    plt.xlabel("时间区间")
-    plt.ylabel("用户数")
-    plt.xticks(rotation=15)
+    plt.title("模块2：二充时间分布", fontproperties=CN_FONT)
+    plt.xlabel("时间区间", fontproperties=CN_FONT)
+    plt.ylabel("用户数", fontproperties=CN_FONT)
+    plt.xticks(rotation=15, fontproperties=CN_FONT)
+    plt.yticks(fontproperties=CN_FONT)
     bar_b64 = _fig_to_base64_png()
 
+    # --- 饼图 ---
     _set_cn_font()
     plt.figure()
-    plt.pie(dist.values, labels=dist.index, autopct=None)
-    plt.title("模块2：二充分布（占比结构）")
+    plt.pie(
+        dist.values,
+        labels=dist.index,
+        autopct=None,
+        textprops={"fontproperties": CN_FONT}
+    )
+    plt.title("模块2：二充分布（占比结构）", fontproperties=CN_FONT)
     pie_b64 = _fig_to_base64_png()
 
     result = {
@@ -187,8 +210,10 @@ def analyze_module2(df: pd.DataFrame) -> Tuple[Dict, str, str, List[str], List[s
     }
     return result, pie_b64, bar_b64, errors, warnings
 
+# ========= 模块3：PLUS（母体=二充非空）+ 解释全表PLUS来源 =========
 def analyze_module3(df: pd.DataFrame) -> Tuple[Dict, str, str, List[str], List[str]]:
     warnings, errors = [], []
+
     need = [COL_SECOND, COL_PLUS]
     miss = _missing_cols(df, need)
     if miss:
@@ -196,6 +221,7 @@ def analyze_module3(df: pd.DataFrame) -> Tuple[Dict, str, str, List[str], List[s
 
     _safe_to_datetime(df, [COL_SECOND, COL_PLUS])
 
+    # 全表PLUS来源
     plus_all = df[df[COL_PLUS].notna()].copy()
     plus_total = len(plus_all)
     plus_without_second = plus_all[plus_all[COL_SECOND].isna()].copy()
@@ -203,12 +229,19 @@ def analyze_module3(df: pd.DataFrame) -> Tuple[Dict, str, str, List[str], List[s
 
     base = df[df[COL_SECOND].notna()].copy()
     base_n = len(base)
+
     if base_n == 0:
-        return {
-            "全表PLUS总数": int(plus_total),
-            "未二充直接PLUS": int(n_plus_without_second),
-            "完成二充用户数(母体)": 0
-        }, "", "", [], ["二充时间全为空：无法做“二充→PLUS”分布，但已返回全表PLUS来源。"]
+        return (
+            {
+                "全表PLUS总数": int(plus_total),
+                "未二充直接PLUS": int(n_plus_without_second),
+                "完成二充用户数(母体)": 0
+            },
+            "",
+            "",
+            [],
+            ["二充时间全为空：无法做“二充→PLUS”分布，但已返回全表PLUS来源。"]
+        )
 
     upgraded = base[base[COL_PLUS].notna()].copy()
     n_plus_after_second = len(upgraded)
@@ -234,22 +267,31 @@ def analyze_module3(df: pd.DataFrame) -> Tuple[Dict, str, str, List[str], List[s
     dist = pd.Series(dist_dict).reindex(order, fill_value=0)
     ratio = (dist / base_n).fillna(0)
 
+    # --- 柱状图：二充母体上的 PLUS 时间分布 ---
     _set_cn_font()
     plt.figure()
     plt.bar(dist.index, dist.values)
     _annotate_bars(dist.values)
-    plt.title("模块3：PLUS时间分布（完成二充用户）")
-    plt.xlabel("时间区间")
-    plt.ylabel("用户数")
-    plt.xticks(rotation=15)
+    plt.title("模块3：PLUS时间分布（完成二充用户）", fontproperties=CN_FONT)
+    plt.xlabel("时间区间", fontproperties=CN_FONT)
+    plt.ylabel("用户数", fontproperties=CN_FONT)
+    plt.xticks(rotation=15, fontproperties=CN_FONT)
+    plt.yticks(fontproperties=CN_FONT)
     bar_b64 = _fig_to_base64_png()
 
+    # --- 饼图：PLUS 来源结构 ---
     source_labels = ["完成二充后PLUS", "未二充直接PLUS"]
     source_values = [int(n_plus_after_second), int(n_plus_without_second)]
+
     _set_cn_font()
     plt.figure()
-    plt.pie(source_values, labels=source_labels, autopct=None)
-    plt.title("模块3：PLUS来源结构")
+    plt.pie(
+        source_values,
+        labels=source_labels,
+        autopct=None,
+        textprops={"fontproperties": CN_FONT}
+    )
+    plt.title("模块3：PLUS来源结构", fontproperties=CN_FONT)
     pie_b64 = _fig_to_base64_png()
 
     result = {
@@ -264,6 +306,7 @@ def analyze_module3(df: pd.DataFrame) -> Tuple[Dict, str, str, List[str], List[s
     }
     return result, pie_b64, bar_b64, errors, warnings
 
+# ========= FastAPI =========
 app = FastAPI()
 templates = Jinja2Templates(directory="app/templates")
 
@@ -277,7 +320,7 @@ def app_page(request: Request):
 
 @app.post("/run")
 async def run(module: str = Form(...), file: UploadFile = File(...)):
-    if module not in {"1","2","3"}:
+    if module not in {"1", "2", "3"}:
         return JSONResponse({"ok": False, "errors": ["模块必须是 1/2/3"], "warnings": []})
 
     if not (file.filename.endswith(".xlsx") or file.filename.endswith(".xls")):
